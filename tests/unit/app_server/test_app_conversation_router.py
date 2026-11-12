@@ -23,6 +23,7 @@ from openhands.app_server.app_conversation.app_conversation_models import (
     AppConversation,
     AppConversationInfo,
     AppConversationPage,
+    AppConversationSortOrder,
     AppConversationStartRequest,
     AppConversationStartTask,
     AppConversationStartTaskStatus,
@@ -859,6 +860,133 @@ class TestSearchAppConversations:
         # Assert
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         mock_service.search_app_conversations.assert_not_called()
+
+    async def test_search_with_sort_order_updated_at_desc(self):
+        """Test that sort_order=UPDATED_AT_DESC returns rows ordered by last update.
+
+        Arrange: Create conversations where created_at order and updated_at order differ,
+                 and configure the service to return items matching sort_order.
+        Act: Call search_app_conversations with sort_order=UPDATED_AT_DESC
+        Assert: Service receives sort_order=UPDATED_AT_DESC and returns rows in updated_at desc order
+        """
+        # Conversation A: created earlier, updated later
+        conv_a = _make_mock_app_conversation()
+        # Conversation B: created later, updated earlier
+        conv_b = _make_mock_app_conversation()
+
+        async def mock_search(**kwargs):
+            order = kwargs.get('sort_order')
+            if order == AppConversationSortOrder.UPDATED_AT_DESC:
+                return AppConversationPage(items=[conv_a, conv_b])
+            return AppConversationPage(items=[conv_b, conv_a])
+
+        mock_service = _make_mock_service()
+        mock_service.search_app_conversations = AsyncMock(side_effect=mock_search)
+
+        result = await search_app_conversations(
+            sort_order=AppConversationSortOrder.UPDATED_AT_DESC,
+            app_conversation_service=mock_service,
+        )
+
+        mock_service.search_app_conversations.assert_called_once()
+        call_kwargs = mock_service.search_app_conversations.call_args[1]
+        assert call_kwargs.get('sort_order') == AppConversationSortOrder.UPDATED_AT_DESC
+        assert result.items == [conv_a, conv_b]
+
+    async def test_search_without_sort_order_defaults_to_created_at_desc(self):
+        """Test that omitting sort_order returns created_at descending (backward compatibility).
+
+        Arrange: Create mock service that returns items matching sort_order
+        Act: Call search_app_conversations without sort_order
+        Assert: Service receives default sort_order=CREATED_AT_DESC and returns rows in created_at desc order
+        """
+        conv_a = _make_mock_app_conversation()
+        conv_b = _make_mock_app_conversation()
+
+        async def mock_search(**kwargs):
+            order = kwargs.get('sort_order')
+            if order == AppConversationSortOrder.CREATED_AT_DESC:
+                return AppConversationPage(items=[conv_b, conv_a])
+            return AppConversationPage(items=[conv_a, conv_b])
+
+        mock_service = _make_mock_service()
+        mock_service.search_app_conversations = AsyncMock(side_effect=mock_search)
+
+        result = await search_app_conversations(
+            app_conversation_service=mock_service,
+        )
+
+        mock_service.search_app_conversations.assert_called_once()
+        call_kwargs = mock_service.search_app_conversations.call_args[1]
+        assert call_kwargs.get('sort_order') == AppConversationSortOrder.CREATED_AT_DESC
+        assert result.items == [conv_b, conv_a]
+
+    def test_search_with_invalid_sort_order_returns_422(self):
+        """Test that an invalid sort_order query parameter returns 422 Unprocessable Entity.
+
+        FastAPI's Query parameter validation against AppConversationSortOrder enum rejects invalid values.
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from openhands.app_server.app_conversation.app_conversation_router import (
+            app_conversation_service_dependency,
+            router,
+        )
+
+        app = FastAPI()
+        app.include_router(router)
+        mock_service = _make_mock_service()
+        app.dependency_overrides[app_conversation_service_dependency.dependency] = (
+            lambda: mock_service
+        )
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get('/app-conversations/search?sort_order=INVALID_ORDER')
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    def test_search_endpoint_with_sort_order_via_client(self):
+        """Test that GET /app-conversations/search respects sort_order via FastAPI TestClient."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from openhands.app_server.app_conversation.app_conversation_router import (
+            app_conversation_service_dependency,
+            router,
+        )
+
+        conv_a = _make_mock_app_conversation()
+        conv_b = _make_mock_app_conversation()
+
+        mock_service = _make_mock_service()
+
+        async def mock_search(**kwargs):
+            order = kwargs.get('sort_order')
+            if order == AppConversationSortOrder.UPDATED_AT_DESC:
+                return AppConversationPage(items=[conv_a, conv_b])
+            return AppConversationPage(items=[conv_b, conv_a])
+
+        mock_service.search_app_conversations = AsyncMock(side_effect=mock_search)
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[app_conversation_service_dependency.dependency] = (
+            lambda: mock_service
+        )
+
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # UPDATED_AT_DESC returns conv_a first
+        res_updated = client.get(
+            '/app-conversations/search?sort_order=UPDATED_AT_DESC'
+        )
+        assert res_updated.status_code == status.HTTP_200_OK
+        assert res_updated.json()['items'][0]['id'] == str(conv_a.id)
+
+        # default returns conv_b first
+        res_default = client.get('/app-conversations/search')
+        assert res_default.status_code == status.HTTP_200_OK
+        assert res_default.json()['items'][0]['id'] == str(conv_b.id)
 
 
 @pytest.mark.asyncio

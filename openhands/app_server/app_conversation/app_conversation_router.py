@@ -35,6 +35,7 @@ from openhands.app_server.app_conversation.app_conversation_models import (
     AppConversation,
     AppConversationInfo,
     AppConversationPage,
+    AppConversationSortOrder,
     AppConversationStartRequest,
     AppConversationStartTask,
     AppConversationStartTaskPage,
@@ -394,6 +395,10 @@ async def search_app_conversations(
         list[str] | None,
         Query(title='Filter by tags as repeatable key=value items; all must match'),
     ] = None,
+    sort_order: Annotated[
+        AppConversationSortOrder,
+        Query(title='Sort order for the results'),
+    ] = AppConversationSortOrder.CREATED_AT_DESC,
     page_id: Annotated[
         str | None,
         Query(title='Optional next_page_id from the previously returned page'),
@@ -425,6 +430,7 @@ async def search_app_conversations(
         updated_at__lt=updated_at__lt,
         sandbox_id__eq=sandbox_id__eq,
         tags__contains=_parse_tag_filters(tags__contains),
+        sort_order=sort_order,
         page_id=page_id,
         limit=limit,
         include_sub_conversations=include_sub_conversations,

@@ -421,6 +421,20 @@ class TestSQLAppConversationInfoService:
         created_times = [item.created_at for item in page.items]
         assert created_times == sorted(created_times, reverse=True)
 
+        # Test updated_at ascending
+        page = await service.search_app_conversation_info(
+            sort_order=AppConversationSortOrder.UPDATED_AT
+        )
+        updated_times = [item.updated_at for item in page.items]
+        assert updated_times == sorted(updated_times)
+
+        # Test updated_at descending
+        page = await service.search_app_conversation_info(
+            sort_order=AppConversationSortOrder.UPDATED_AT_DESC
+        )
+        updated_times = [item.updated_at for item in page.items]
+        assert updated_times == sorted(updated_times, reverse=True)
+
         # Test title ascending
         page = await service.search_app_conversation_info(
             sort_order=AppConversationSortOrder.TITLE
